@@ -1,0 +1,143 @@
+import /init.microtrust.rc
+
+on init
+    chmod 0777 /system/bin/variant-script.sh
+    export LD_LIBRARY_PATH /system/lib64:/vendor/lib64:/vendor/lib64/hw:/system/lib64/hw
+    mkdir /tmp/misc 0775 root root
+    mkdir /tmp/misc/keystore 0700 keystore keystore
+    symlink /vendor/lib64/libTEECommon.so /system/lib64/libTEECommon.so
+    symlink /vendor/lib64/libteei_daemon_vfs.so /system/lib64/libteei_daemon_vfs.so
+    symlink /vendor/lib64/libimsg_log.so /system/lib64/libimsg_log.so
+    symlink /vendor/lib64/hw/gatekeeper.beanpod.so /system/lib64/hw/gatekeeper.beanpod.so
+    symlink /vendor/lib64/hw/kmsetkey.beanpod.so /system/lib64/hw/kmsetkey.beanpod.so
+    symlink /vendor/lib64/hw/displayfeature.default.so /system/lib64/hw/displayfeature.default.so
+    symlink /vendor/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service /system/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service
+
+on post-fs
+    # Support A/B feature for EMMC and UFS boot region
+    wait /dev/block/mmcblk0boot0 2
+    symlink /dev/block/sda /dev/block/mmcblk0boot0
+    symlink /dev/block/sdb /dev/block/mmcblk0boot1
+    symlink /dev/block/mmcblk0boot0 /dev/block/by-name/preloader_a
+    symlink /dev/block/mmcblk0boot1 /dev/block/by-name/preloader_b
+
+    symlink /dev/block/platform/bootdevice /dev/block/bootdevice
+
+    # Support A/B feature for combo emmc and ufs OTA update
+    symlink /dev/block/by-name/preloader_a /dev/block/by-name/preloader_emmc_a
+    symlink /dev/block/by-name/preloader_b /dev/block/by-name/preloader_emmc_b
+    symlink /dev/block/by-name/preloader_a /dev/block/by-name/preloader_ufs_a
+    symlink /dev/block/by-name/preloader_b /dev/block/by-name/preloader_ufs_b
+
+    exec u:r:update_engine:s0 root root -- /system/bin/mtk_plpath_utils
+    start mtk.plpath.utils.link
+
+    symlink /dev/block/mapper/pl_a /dev/block/by-name/preloader_raw_a
+    symlink /dev/block/mapper/pl_b /dev/block/by-name/preloader_raw_b
+
+on property:ro.crypto.state=encrypted && property:ro.crypto.type=file
+    install_keyring
+
+service mtk.plpath.utils.link /system/bin/mtk_plpath_utils
+    class main
+    user root
+    group root system
+    disabled
+    oneshot
+    seclabel u:r:recovery:s0
+
+service variant-script /system/bin/variant-script.sh
+    user root
+    group root
+    oneshot    
+    disabled
+    seclabel u:r:recovery:s0
+
+service gatekeeper-1-0 /system/bin/android.hardware.gatekeeper@1.0-service
+    interface android.hardware.gatekeeper@1.0::IGatekeeper default
+    user root
+    group root
+    disabled
+    seclabel u:r:recovery:s0
+
+service keymaster-4-1-beanpod /system/bin/android.hardware.keymaster@4.1-service.beanpod
+    interface android.hardware.keymaster@4.0::IKeymasterDevice default
+    interface android.hardware.keymaster@4.1::IKeymasterDevice default
+    user root
+    group root drmrpc
+    oneshot    
+    disabled
+    seclabel u:r:recovery:s0
+
+service vibratorfeature-hal-service /system/bin/hw/vendor.xiaomi.hardware.vibratorfeature.service
+     class hal 
+     user root 
+     group root input system 
+     seclabel u:r:recovery:s0
+
+on property:crypto.ready=1
+    start keymaster-4-1-beanpod 
+
+on property:hwservicemanager.ready=true
+    start keymaster-4-1-beanpod
+    start gatekeeper-1-0
+
+on property:vendor.sys.listener.registered=true
+    start keymaster-4-1-beanpod
+    start gatekeeper-1-0
+
+on property:ro.crypto.state=unsupported
+    stop teei_daemon
+    stop keymaster-4-1-beanpod 
+    stop gatekeeper-1-0
+    
+on property:ro.crypto.state=unencrypted
+    stop teei_daemon    
+    stop keymaster-4-1-beanpod 
+    stop gatekeeper-1-0
+        
+on property:twrp.all.users.decrypted=true
+    stop teei_daemon
+    stop keymaster-4-1-beanpod 
+    stop gatekeeper-1-0
+
+on boot
+    start variant-script
+    start boot-hal-1-2
+    start health-hal-2-1
+    start vibratorfeature-hal-service
+    symlink /sys/class/leds/torch-light0 /sys/class/leds/flashlight
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/0-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/0-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/1-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/1-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/2-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/2-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/3-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/aw8697_haptic/3-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/cont
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/index
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/gain
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/1-005a/activate
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/1-005a/duration
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/1-005a/cont
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/1-005a/index
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/1-005a/gain
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/cont
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/activate
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/duration
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/index
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/gain
+    chmod 0666 /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/state
+    chmod 0666 /sys/bus/i2c/drivers/awinic_haptic/0-005a/state
+    write /sys/bus/i2c/drivers/awinic_haptic/0-005a/state "1"
+    write /sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/state "1"
+
+# Fix flashlight on orangefox
+on property:ro.orangefox.boot=1
+    mkdir /tmp/flashlight
+    write /tmp/flashlight/max_brightness "350"
+    symlink /sys/class/leds/torch-light0/brightness /tmp/flashlight/brightness
+    symlink /sys/class/leds/torch-light0 /sys/class/leds/flashlight

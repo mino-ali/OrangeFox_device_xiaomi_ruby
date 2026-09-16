@@ -1,0 +1,42 @@
+diff --git a/payload_consumer/filesystem_verifier_action.cc b/payload_consumer/filesystem_verifier_action.cc
+index 8b39f6d..a4805ff 100644
+--- a/payload_consumer/filesystem_verifier_action.cc
++++ b/payload_consumer/filesystem_verifier_action.cc
+@@ -28,6 +28,7 @@
+ #include <string>
+ #include <utility>
+ 
++#include <android-base/properties.h> // [Darth9, 20251104]
+ #include <base/bind.h>
+ #include <base/strings/string_util.h>
+ #include <brillo/data_encoding.h>
+@@ -40,6 +41,7 @@
+ #include "update_engine/common/utils.h"
+ #include "update_engine/payload_consumer/file_descriptor.h"
+ 
++using android::base::GetBoolProperty; // [Darth9, 20251104]
+ using brillo::data_encoding::Base64Encode;
+ using std::string;
+ 
+@@ -442,9 +444,18 @@ void FilesystemVerifierAction::FinishPartitionHashing() {
+         LOG(ERROR) << "New '" << partition.name
+                    << "' partition verification failed.";
+         if (partition.source_hash.empty()) {
+-          // No need to verify source if it is a full payload.
+-          Cleanup(ErrorCode::kNewRootfsVerificationError);
+-          return;
++		//  [Darth9, 20251104] - work around ROM hash verification flashing error (caused by crDroid+NikGapps on alioth)
++		if (android::base::GetProperty("ro.virtual_ab.skip_verify_source_hash", "") == "true") {
++			LOG(INFO) << "No need to verify the source (of " << partition.name
++			<< ") if it is a full payload. Continuing ...";
++			partition_index_++;
++		}
++		else { // [Darth9, 20251104]
++			// No need to verify source if it is a full payload.
++			Cleanup(ErrorCode::kNewRootfsVerificationError);
++			LOG(ERROR) << "Try re-flashing the ROM immediately.";
++			return;
++		} // [Darth9, 20251104]
+         }
+         // If we have not verified source partition yet, now that the target
+         // partition does not match, and it's not a full payload, we need to

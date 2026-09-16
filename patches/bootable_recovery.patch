@@ -1,0 +1,428 @@
+diff --git a/data.cpp b/data.cpp
+index 25b883e7..7373874e 100755
+--- a/data.cpp
++++ b/data.cpp
+@@ -948,9 +948,9 @@ void DataManager::SetDefaultValues()
+   //[f/d]
+  
+ #ifndef TW_NO_HAPTICS
+-	mPersist.SetValue("tw_button_vibrate", "40");
+-	mPersist.SetValue("tw_keyboard_vibrate", "40");
+-	mPersist.SetValue("tw_action_vibrate", "160");
++	mPersist.SetValue("tw_button_vibrate", "9");
++	mPersist.SetValue("tw_keyboard_vibrate", "9");
++	mPersist.SetValue("tw_action_vibrate", "35");
+ 	mConst.SetValue("tw_disable_haptics", "0");
+ #else
+ 	LOGINFO("TW_NO_HAPTICS := true\n");
+@@ -1690,6 +1690,21 @@ void DataManager::Vibrate(const string& varName)
+ 	int vib_value = 0;
+ 	GetValue(varName, vib_value);
+ 	if (vib_value) {
++		if (varName == "tw_button_vibrate" || varName == "tw_keyboard_vibrate") {
++			if (vib_value == 40 || vib_value >= 80) {
++				vib_value = 9;
++				SetValue(varName, 9);
++			} else if (vib_value > 30) {
++				vib_value = 30;
++			}
++		} else if (varName == "tw_action_vibrate") {
++			if (vib_value == 160 || vib_value >= 150) {
++				vib_value = 35;
++				SetValue(varName, 35);
++			} else if (vib_value > 70) {
++				vib_value = 70;
++			}
++		}
+ 		vibrate(vib_value);
+ 	}
+ #endif
+diff --git a/gui/theme/portrait_hdpi/pages/settings.xml b/gui/theme/portrait_hdpi/pages/settings.xml
+index db827849..b3d143ff 100644
+--- a/gui/theme/portrait_hdpi/pages/settings.xml
++++ b/gui/theme/portrait_hdpi/pages/settings.xml
+@@ -589,7 +589,7 @@
+ 
+ 			<slidervalue>
+ 				<placement x="%slider_x%" y="%row1_3_y%" w="%slidervalue_w%"/>
+-				<data variable="tw_button_vibrate" min="0" max="300" showrange="0" showcurr="0" changeondrag="1"/>
++				<data variable="tw_button_vibrate" min="0" max="30" showrange="0" showcurr="0" changeondrag="1"/>
+ 			</slidervalue>
+ 
+ 			<text style="text_body1">
+@@ -606,7 +606,7 @@
+ 
+ 			<slidervalue>
+ 				<placement x="%slider_x%" y="%row3_1a_y%" w="%slidervalue_w%"/>
+-				<data variable="tw_keyboard_vibrate" min="0" max="300" showrange="0" showcurr="0" changeondrag="1"/>
++				<data variable="tw_keyboard_vibrate" min="0" max="30" showrange="0" showcurr="0" changeondrag="1"/>
+ 			</slidervalue>
+ 
+ 			<text style="text_body1">
+@@ -623,7 +623,7 @@
+ 
+ 			<slidervalue>
+ 				<placement x="%slider_x%" y="%row4_3_y%" w="%slidervalue_w%"/>
+-				<data variable="tw_action_vibrate" min="0" max="500" showrange="0" showcurr="0" changeondrag="1"/>
++				<data variable="tw_action_vibrate" min="0" max="70" showrange="0" showcurr="0" changeondrag="1"/>
+ 			</slidervalue>
+ 
+ 			<template name="gestures"/>
+diff --git a/minuitwrp/events.cpp b/minuitwrp/events.cpp
+index e497df62..ac05442b 100644
+--- a/minuitwrp/events.cpp
++++ b/minuitwrp/events.cpp
+@@ -27,9 +27,9 @@
+ #include <stdio.h>
+ #include <string.h>
+ #include <fstream>
+-#ifdef USE_QTI_AIDL_HAPTICS_FIX_OFF
+ #include <thread>
+-#endif
++#include <signal.h>
++#include <time.h>
+ 
+ #ifdef USE_QTI_HAPTICS
+ #include <android/hardware/vibrator/1.2/IVibrator.h>
+@@ -147,19 +147,264 @@ int write_to_file(const std::string& fn, const std::string& line) {
+ 
+ #ifndef TW_NO_HAPTICS
+ #ifndef TW_HAPTICS_TSPDRV
++static timer_t ruby_cont_timer = {};
++static bool ruby_cont_timer_ready = false;
++static std::string ruby_active_cont_path = "";
++static bool ruby_cont_logged = false;
++
++static void ruby_stop_awinic_cont(union sigval) {
++    if (!ruby_active_cont_path.empty()) {
++        write_to_file(ruby_active_cont_path, "0");
++    }
++}
++
++static bool ruby_init_cont_timer() {
++    if (ruby_cont_timer_ready) return true;
++
++    struct sigevent sev = {};
++    sev.sigev_notify = SIGEV_THREAD;
++    sev.sigev_notify_function = ruby_stop_awinic_cont;
++    sev.sigev_value.sival_ptr = nullptr;
++
++    if (timer_create(CLOCK_MONOTONIC, &sev, &ruby_cont_timer) != 0) {
++        return false;
++    }
++    ruby_cont_timer_ready = true;
++    return true;
++}
++
++static bool ruby_vibrate_awinic_cont(int timeout_ms) {
++    if (timeout_ms <= 0) return false;
++
++    if (ruby_active_cont_path.empty()) {
++        static const std::string cont_candidates[] = {
++            "/sys/devices/platform/11e00000.i2c0/i2c-0/0-005a/cont",
++            "/sys/bus/i2c/drivers/awinic_haptic/0-005a/cont",
++            "/sys/bus/i2c/drivers/awinic_haptic/1-005a/cont",
++            "/sys/bus/i2c/drivers/awinic_haptic/2-005a/cont",
++            "/sys/bus/i2c/drivers/aw8697_haptic/0-005a/cont",
++            "/sys/bus/i2c/drivers/aw8697_haptic/1-005a/cont",
++            "/sys/class/timed_output/vibrator/cont"
++        };
++        for (const auto& p : cont_candidates) {
++            if (access(p.c_str(), W_OK) == 0) {
++                ruby_active_cont_path = p;
++                std::string parent = p.substr(0, p.rfind('/'));
++                std::string state_file = parent + "/state";
++                if (access(state_file.c_str(), W_OK) == 0) {
++                    write_to_file(state_file, "1");
++                }
++                break;
++            }
++        }
++        if (ruby_active_cont_path.empty()) {
++            return false;
++        }
++    }
++
++    const int duration_ms = timeout_ms > 1000 ? 1000 : timeout_ms;
++
++    if (write_to_file(ruby_active_cont_path, "1") != 0) {
++        return false;
++    }
++
++    if (!ruby_init_cont_timer()) {
++        std::string path = ruby_active_cont_path;
++        std::thread([path, duration_ms]() {
++            usleep(duration_ms * 1000);
++            write_to_file(path, "0");
++        }).detach();
++        return true;
++    }
++
++    struct itimerspec its = {};
++    its.it_value.tv_sec = duration_ms / 1000;
++    its.it_value.tv_nsec = static_cast<long>(duration_ms % 1000) * 1000000L;
++    if (its.it_value.tv_sec == 0 && its.it_value.tv_nsec == 0) {
++        its.it_value.tv_nsec = 1000000L;
++    }
++
++    if (timer_settime(ruby_cont_timer, 0, &its, nullptr) != 0) {
++        write_to_file(ruby_active_cont_path, "0");
++        return false;
++    }
++
++    if (!ruby_cont_logged) {
++        LOGI("VIBRATOR: Using Awinic continuous haptics at %s\n", ruby_active_cont_path.c_str());
++        ruby_cont_logged = true;
++    }
++    return true;
++}
++
++static int ruby_ff_fd = -2;
++static int ruby_ff_effect_id = -1;
++static int ruby_ff_effect_type = -1;
++
++static bool ruby_ff_test_bit(unsigned int bit, const unsigned long* bits) {
++    const unsigned int bits_per_long = sizeof(unsigned long) * 8U;
++    return (bits[bit / bits_per_long] >> (bit % bits_per_long)) & 1UL;
++}
++
++static int ruby_open_input_ff_haptics() {
++    if (ruby_ff_fd >= 0) return ruby_ff_fd;
++    ruby_ff_fd = -2;
++
++    DIR* dir = opendir("/dev/input");
++    if (dir == nullptr) return -1;
++
++    struct dirent* de = nullptr;
++    while ((de = readdir(dir)) != nullptr) {
++        if (strncmp(de->d_name, "event", 5) != 0) continue;
++
++        char path[PATH_MAX] = {};
++        snprintf(path, sizeof(path), "/dev/input/%s", de->d_name);
++        int fd = open(path, O_RDWR | O_CLOEXEC);
++        if (fd < 0) continue;
++
++        char name[256] = {};
++        if (ioctl(fd, EVIOCGNAME(sizeof(name)), name) < 0) {
++            close(fd);
++            continue;
++        }
++
++        const unsigned int bits_per_long = sizeof(unsigned long) * 8U;
++        unsigned long ev_bits[(EV_MAX + bits_per_long) / bits_per_long] = {};
++        if (ioctl(fd, EVIOCGBIT(0, sizeof(ev_bits)), ev_bits) < 0 ||
++            !ruby_ff_test_bit(EV_FF, ev_bits)) {
++            close(fd);
++            continue;
++        }
++
++        unsigned long ff_bits[(FF_MAX + bits_per_long) / bits_per_long] = {};
++        if (ioctl(fd, EVIOCGBIT(EV_FF, sizeof(ff_bits)), ff_bits) < 0) {
++            close(fd);
++            continue;
++        }
++
++        if (ruby_ff_test_bit(FF_RUMBLE, ff_bits)) {
++            ruby_ff_effect_type = FF_RUMBLE;
++        } else if (ruby_ff_test_bit(FF_CONSTANT, ff_bits)) {
++            ruby_ff_effect_type = FF_CONSTANT;
++        } else {
++            close(fd);
++            continue;
++        }
++
++        ruby_ff_fd = fd;
++        LOGI("VIBRATOR: Using input FF device '%s' at %s (effect=%s)\n",
++             name, path, ruby_ff_effect_type == FF_RUMBLE ? "FF_RUMBLE" : "FF_CONSTANT");
++        break;
++    }
++
++    closedir(dir);
++    return ruby_ff_fd >= 0 ? ruby_ff_fd : -1;
++}
++
++static void ruby_reset_ff_backend(int fd) {
++    if (ruby_ff_effect_id >= 0) {
++        struct input_event stop = {};
++        stop.type = EV_FF;
++        stop.code = static_cast<__u16>(ruby_ff_effect_id);
++        stop.value = 0;
++        (void)write(fd, &stop, sizeof(stop));
++        (void)ioctl(fd, EVIOCRMFF, ruby_ff_effect_id);
++    }
++    ruby_ff_effect_id = -1;
++    ruby_ff_effect_type = -1;
++    if (fd >= 0) close(fd);
++    ruby_ff_fd = -2;
++}
++
++static bool ruby_vibrate_input_ff(int timeout_ms) {
++    int fd = ruby_open_input_ff_haptics();
++    if (fd < 0 || timeout_ms <= 0) return false;
++
++    struct ff_effect effect = {};
++    effect.type = static_cast<__u16>(ruby_ff_effect_type);
++    effect.id = static_cast<__s16>(ruby_ff_effect_id);
++    effect.replay.length = static_cast<__u16>(timeout_ms > 1000 ? 1000 : timeout_ms);
++    effect.replay.delay = 0;
++
++    if (ruby_ff_effect_type == FF_CONSTANT) {
++        effect.u.constant.level = 0x3fff;
++        effect.u.constant.envelope.attack_length = 0;
++        effect.u.constant.envelope.fade_length = 0;
++    } else {
++        effect.u.rumble.strong_magnitude = 0x3fff;
++        effect.u.rumble.weak_magnitude = 0x2fff;
++    }
++
++    if (ioctl(fd, EVIOCSFF, &effect) < 0) {
++        ruby_reset_ff_backend(fd);
++        return false;
++    }
++    ruby_ff_effect_id = effect.id;
++
++    struct input_event play = {};
++    play.type = EV_FF;
++    play.code = static_cast<__u16>(ruby_ff_effect_id);
++    play.value = 1;
++
++    if (write(fd, &play, sizeof(play)) != static_cast<ssize_t>(sizeof(play))) {
++        ruby_reset_ff_backend(fd);
++        return false;
++    }
++    return true;
++}
++
++static bool ruby_vibrate_sysfs(int timeout_ms) {
++    if (timeout_ms <= 0) return false;
++    char tout[16];
++    snprintf(tout, sizeof(tout), "%d", timeout_ms);
++
++    static const std::string possible_haptic_paths[] = {
++        "/sys/devices/platform/11e00000.i2c0/i2c-0/0-005a",
++        "/sys/bus/i2c/drivers/awinic_haptic/0-005a",
++        "/sys/bus/i2c/drivers/awinic_haptic/1-005a",
++        "/sys/bus/i2c/drivers/awinic_haptic/2-005a",
++        "/sys/bus/i2c/drivers/aw8697_haptic/0-005a",
++        "/sys/bus/i2c/drivers/aw8697_haptic/1-005a",
++        "/sys/class/leds/vibrator"
++    };
++
++    for (const auto& hpath : possible_haptic_paths) {
++        std::string act = hpath + "/activate";
++        std::string dur = hpath + "/duration";
++        if (access(act.c_str(), W_OK) == 0) {
++            std::string state_file = hpath + "/state";
++            if (access(state_file.c_str(), W_OK) == 0) {
++                write_to_file(state_file, "1");
++            }
++            std::string idx = hpath + "/index";
++            if (access(idx.c_str(), W_OK) == 0) {
++                write_to_file(idx, "1");
++            }
++            std::string gain = hpath + "/gain";
++            if (access(gain.c_str(), W_OK) == 0) {
++                write_to_file(gain, "80");
++            }
++            write_to_file(dur, tout);
++            write_to_file(act, "1");
++            return true;
++        }
++    }
++    return false;
++}
++
+ int vibrate(int timeout_ms)
+ {
+-    if (timeout_ms > 10000) timeout_ms = 1000;
+-    char tout[6];
+-    sprintf(tout, "%i", timeout_ms);
++    if (timeout_ms > 70) timeout_ms = 70;
++    char tout[16];
++    snprintf(tout, sizeof(tout), "%d", timeout_ms);
+ 
+ #ifdef USE_QTI_HAPTICS
+     android::sp<android::hardware::vibrator::V1_2::IVibrator> vib = android::hardware::vibrator::V1_2::IVibrator::getService();
+     if (vib != nullptr) {
+         vib->on((uint32_t)timeout_ms);
++        return 0;
+     }
+ #elif defined(USE_QTI_AIDL_HAPTICS)
+-    std::shared_ptr<IVibrator> vib = IVibrator::fromBinder(ndk::SpAIBinder(AServiceManager_getService(kVibratorInstance.c_str())));
++    std::shared_ptr<IVibrator> vib = IVibrator::fromBinder(ndk::SpAIBinder(AServiceManager_checkService(kVibratorInstance.c_str())));
+     if (vib != nullptr) {
+ #ifdef USE_QTI_AIDL_HAPTICS_FIX_OFF
+         std::thread([vib, timeout_ms] {
+@@ -173,21 +418,32 @@ int vibrate(int timeout_ms)
+ #else
+         vib->on((uint32_t)timeout_ms, nullptr);
+ #endif
++        return 0;
+     }
+ #elif defined(USE_SAMSUNG_HAPTICS)
+-    /* Newer Samsung devices have duration file only
+-     0 in VIBRATOR_TIMEOUT_FILE means no vibration
+-     Anything else is the vibration running for X milliseconds */
+     if (std::ifstream(VIBRATOR_TIMEOUT_FILE).good()) {
+         write_to_file(VIBRATOR_TIMEOUT_FILE, tout);
++        return 0;
+     }
+-#else
+-    if (std::ifstream(LEDS_HAPTICS_ACTIVATE_FILE).good()) {
+-        write_to_file(LEDS_HAPTICS_DURATION_FILE, tout);
+-        write_to_file(LEDS_HAPTICS_ACTIVATE_FILE, "1");
+-    } else
+-        write_to_file(VIBRATOR_TIMEOUT_FILE, tout);
+ #endif
++
++    // 1. Awinic hardware continuous mode (AW869x / MT6877)
++    if (ruby_vibrate_awinic_cont(timeout_ms)) {
++        return 0;
++    }
++
++    // 2. Linux Input Force Feedback subsystem (/dev/input/event*)
++    if (ruby_vibrate_input_ff(timeout_ms)) {
++        return 0;
++    }
++
++    // 3. Sysfs activate / duration (with index & gain setup)
++    if (ruby_vibrate_sysfs(timeout_ms)) {
++        return 0;
++    }
++
++    // 4. Legacy timed_output enable node
++    write_to_file(VIBRATOR_TIMEOUT_FILE, tout);
+     return 0;
+ }
+ #endif
+diff --git a/twrpinstall/twinstall.cpp b/twrpinstall/twinstall.cpp
+index 3691a2f1..c1880ca2 100755
+--- a/twrpinstall/twinstall.cpp
++++ b/twrpinstall/twinstall.cpp
+@@ -449,18 +449,20 @@ int TWinstall_zip(const char *path, int *wipe_cache, bool check_for_digest)
+ 				TWFunc::RunFoxScript(FOX_PRE_ROM_FLASH_SCRIPT, path);
+ 			}
+ 
++			umount("/system/bin/sh");
++			unlink("/tmp/sh");
++			PartitionManager.UnMount_By_Path("/vendor", false);
++			PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), false);
++			if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
++				PartitionManager.Unmap_Super_Devices();
++			}
++
+ 			TWFunc::IsRecoveryOverwritten(true);
+ 
+ 			ret_val = Run_Update_Binary(path, wipe_cache, AB_OTA_ZIP_TYPE);
+ 
+ 			DataManager::SetValue(FOX_ZIP_INSTALLER_CODE, 1); // mark as custom ROM install
+ 
+-			umount("/system/bin/sh");
+-			unlink("/tmp/sh");
+-			if (!vendor_mount_state)
+-				PartitionManager.UnMount_By_Path("/vendor", false);
+-			if (!system_mount_state)
+-				PartitionManager.UnMount_By_Path(PartitionManager.Get_Android_Root_Path(), false);
+ 			if (android::base::GetBoolProperty("ro.virtual_ab.enabled", false)) {
+ 				PartitionManager.Unlock_Block_Partitions();
+ 				PartitionManager.Prepare_All_Super_Volumes();
