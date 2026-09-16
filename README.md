@@ -79,7 +79,7 @@ Medium checks
 - [x] all important partitions listed in mount/backup lists
 - [x] backup/restore to/from external (USB-OTG) storage
 - [ ] backup/restore to/from adb
-- [ ] decrypt
+- [x] decrypt
 - [x] Correct date
 
 Minor checks
