@@ -1,4 +1,4 @@
-# TWRP Device tree for the Redmi Note 12 Pro(+) 5G
+# OrangeFox Device tree for the Redmi Note 12 Pro(+) 5G
 
 The Redmi Note 12 [Pro(+) 5G/Discovery] (codenamed _"ruby"_) are mid-range smartphones from Xiaomi.
 
@@ -75,11 +75,11 @@ Medium checks
 - [x] update.zip sideload
 - [x] UI colors (red/blue inversions)
 - [x] Screen goes off and on
-- [x] F2FS/EXT4 Support, exFAT/NTFS where supported
+- [ ] F2FS/EXT4 Support, exFAT/NTFS where supported
 - [x] all important partitions listed in mount/backup lists
 - [x] backup/restore to/from external (USB-OTG) storage
-- [x] backup/restore to/from adb (https://gerrit.omnirom.org/#/c/15943/)
-- [x] decrypt /data (use the tool I offer to do this)
+- [ ] backup/restore to/from adb
+- [ ] decrypt
 - [x] Correct date
 
 Minor checks
@@ -89,13 +89,13 @@ Minor checks
 - [x] poweroff
 - [x] battery level
 - [x] temperature
-- [x] encrypted backups
-- [x] input devices via USB (USB-OTG) - keyboard, mouse and disks
+- [ ] encrypted backups
+- [ ] input devices via USB (USB-OTG) - keyboard, mouse and disks
 - [x] USB mass storage export
 - [x] set brightness
 - [x] vibrate
 - [x] screenshot
-- [x] partition SD card
+- [ ] partition SD card
 
 ## Device Picture
 
@@ -106,6 +106,7 @@ Minor checks
 ## License & Credits
 
 - Base device tree by [qiangua2460](https://github.com/qiangua2460/recovery_device_xiaomi_ruby) and [YZBruh](https://github.com/YZBruh)
+- Kernel by [Rubyxlabs](https://github.com/RubyxLabs/kernel_xiaomi_mt6877)
 - OrangeFox Recovery Project & TeamWin Recovery Project (TWRP)
 - Licensed under the [Apache License, Version 2.0](LICENSE)
 
